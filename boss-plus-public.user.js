@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Boss-Plus Public
 // @namespace    https://github.com/ANICIFIA/boss-plus-public
-// @version      1.0.0
+// @version      1.0.1
 // @author       ANICIFIA
 // @license      MIT
 // @description  通用 AI 招呼语生成 + 智能投递助手，支持自定义大模型 API 和个人经验数据导入
@@ -445,16 +445,14 @@
   const CONFIG_KEY = 'bp_enhanced_config';
   const COMPANY_LIST_KEY = 'bp_enhanced_blocked_companies';
   const RESUME_DATA_KEY = 'bp_enhanced_resume_data';
-  const PERSONAL_SUMMARY_KEY = 'bp_enhanced_personal_summary';
 
 
   const DEFAULTS = {
-    enableDeepSeekGreeting: true,
     deepseekApiKey: GM_getValue('deep_api_key', '') || '',
     deepseekModel: 'deepseek-v4-flash',
     deepseekBaseUrl: 'https://api.deepseek.com',
-    applyLimit: 0,
-    refreshLimit: 3,
+    applyLimit: 10,
+    refreshLimit: 10,
     applyIntervalMin: 5,
     applyIntervalMax: 20,
     skipCommunicated: true,
@@ -975,15 +973,23 @@ function saveBlockedCompanies(list) {
     localStorage.setItem(RESUME_DATA_KEY, JSON.stringify(data));
   }
 
-  function getPersonalSummary() {
+  // Parse user-pasted JSON, auto-fixing literal control chars (newlines/tabs)
+  // that are illegal in JSON strings but common in JS-originated data
+  function parseResumeJSON(raw) {
     try {
-      var raw = localStorage.getItem(PERSONAL_SUMMARY_KEY);
-      return raw || '';
-    } catch (e) { return ''; }
-  }
-
-  function setPersonalSummary(text) {
-    localStorage.setItem(PERSONAL_SUMMARY_KEY, text || '');
+      return JSON.parse(raw);
+    } catch (e) {
+      if (e.message.indexOf('Bad control character') !== -1 || e.message.indexOf('Unexpected token') !== -1) {
+        // Escape literal control characters and retry
+        var cleaned = raw
+          .replace(/\r\n/g, '\n')
+          .replace(/\r/g, '')
+          .replace(/\n/g, '\\n')
+          .replace(/\t/g, '\\t');
+        return JSON.parse(cleaned);
+      }
+      throw e;
+    }
   }
 
 
@@ -1053,16 +1059,14 @@ function saveBlockedCompanies(list) {
 
     // 3. 最后兜底：硬编码默认 prompt
     console.error('[BPE] ⚠ 使用硬编码兜底 prompt，system-prompt.txt 未生效！请检查 server.js 是否运行');
-    SYSTEM_PROMPT_CACHE = '你是一位专业的求职沟通助手。你的任务是根据我的个人过往经验，为特定岗位生成一段个性化、专业、真诚的招呼语，用于在BOSS直聘上与招聘者沟通。\n我的过往经验（按优先级从高到低排列，数字越大越优先匹配）：\n{{RESUME_SUMMARY}}\n招呼语格式要求（严格遵守）\n第一段（首段开场）：20-30字，必须包含「核心身份+总览成果+1个最匹配核心能力」，100%基于真实经验，禁止任何虚构引申。\n第二段（总览介绍）：「尊敬的HR老师您好～」开头，紧接着必须展示「{{PERSONAL_SUMMARY}}」，再表达应聘该岗位的真诚意愿。并且说明个人优势有”以下几个方面：”，总计80字内\n接下来分段以第一人称介绍个人匹配的核心优势：最多3个优势，每个优势80字内，独立成段。严格遵循「通过经验提取通用能力标签（“擅长XXXX：”）+具体项目佐证+量化成果+岗位迁移价值」结构，先提炼能力，再用项目数据支撑。\n最后一段：结合公司/行业特点表达兴趣，结尾统一为「期待随时沟通～」。\n匹配经验的选择规则：\n绝对真实性红线（三禁止）：\n禁止编造任何不存在的经验、数据和能力\n禁止将教育背景、行业认知等同于实际产品/项目经验\n禁止跨领域过度引申（如电商B端≠金融B端）\n每条经验独立使用，禁止将不同编号的经验内容拼接混合，不得篡改原始数据。\n优先选择与JD匹配度最高的经验；匹配度相近时，选择优先级更高的经验。禁止为了使用高优先级经验而强行匹配不相关内容。\n类型匹配优先：产品岗优先产品工作经验，分析岗优先分析经验。当无直接领域经验时，优先匹配可迁移的通用产品能力。\n低匹配度场景规范：当无直接相关经验时，必须主动说明「虽无XX领域直接经验，但具备可快速迁移的XX能力」，严禁强行声称有相关经验。\n注意事项\n自然真诚，不夸大不营销，保持专业的同时有人情味\n所有内容必须100%来自提供的经验列表\n优先展示量化成果，用数据说话\n每个优势必须明确说明对目标岗位的具体价值\n只返回最终的招呼语文本，不要添加任何解释、说明、标题或标记';
+    SYSTEM_PROMPT_CACHE = '你是一位专业的求职沟通助手。你的任务是根据我的个人过往经验，为特定岗位生成一段个性化、专业、真诚的招呼语，用于在BOSS直聘上与招聘者沟通。\n我的过往经验（按优先级从高到低排列，数字越大越优先匹配）：\n{{RESUME_SUMMARY}}\n招呼语格式要求（严格遵守）\n第一段（首段开场）：20-30字，必须包含「核心身份+总览成果+1个最匹配核心能力」，100%基于真实经验，禁止任何虚构引申。\n第二段（总览介绍）：「尊敬的HR老师您好～」开头，基于个人经验数据概括核心优势，表达应聘该岗位的真诚意愿。并且说明个人优势有”以下几个方面：”，总计80字内\n接下来分段以第一人称介绍个人匹配的核心优势：最多3个优势，每个优势80字内，独立成段。严格遵循「通过经验提取通用能力标签（“擅长XXXX：”）+具体项目佐证+量化成果+岗位迁移价值」结构，先提炼能力，再用项目数据支撑。\n最后一段：结合公司/行业特点表达兴趣，结尾统一为「期待随时沟通～」。\n匹配经验的选择规则：\n绝对真实性红线（三禁止）：\n禁止编造任何不存在的经验、数据和能力\n禁止将教育背景、行业认知等同于实际产品/项目经验\n禁止跨领域过度引申（如电商B端≠金融B端）\n每条经验独立使用，禁止将不同编号的经验内容拼接混合，不得篡改原始数据。\n优先选择与JD匹配度最高的经验；匹配度相近时，选择优先级更高的经验。禁止为了使用高优先级经验而强行匹配不相关内容。\n类型匹配优先：产品岗优先产品工作经验，分析岗优先分析经验。当无直接领域经验时，优先匹配可迁移的通用产品能力。\n低匹配度场景规范：当无直接相关经验时，必须主动说明「虽无XX领域直接经验，但具备可快速迁移的XX能力」，严禁强行声称有相关经验。\n注意事项\n自然真诚，不夸大不营销，保持专业的同时有人情味\n所有内容必须100%来自提供的经验列表\n优先展示量化成果，用数据说话\n每个优势必须明确说明对目标岗位的具体价值\n只返回最终的招呼语文本，不要添加任何解释、说明、标题或标记';
     return SYSTEM_PROMPT_CACHE;
   }
 
 
   async function buildSystemPrompt() {
     var template = await getSystemPromptTemplate();
-    return template
-      .replace('{{RESUME_SUMMARY}}', buildResumeSummary())
-      .replace('{{PERSONAL_SUMMARY}}', getPersonalSummary() || '（请在设置面板中填写个人核心优势总结）');
+    return template.replace('{{RESUME_SUMMARY}}', buildResumeSummary());
   }
 
   var lastApiError = null;
@@ -1070,9 +1074,6 @@ function saveBlockedCompanies(list) {
   async function callDeepSeekForGreeting(jobInfo) {
     var config = getConfig();
     var apiKey = getApiKey();
-    if (!config.enableDeepSeekGreeting) {
-      return null;
-    }
     if (!apiKey) {
       lastApiError = 'API Key 未设置';
       return null;
@@ -2388,19 +2389,10 @@ function saveBlockedCompanies(list) {
     // Build all HTML in one string (content + footer)
     const html = `
       <div class="bpe-settings-group">
-        <div class="bpe-settings-label">
-          <div><span>启用 DeepSeek 招呼语生成</span><p class="bpe-settings-desc">开启后自动调用 AI 生成个性化招呼语</p></div>
-          <label class="bpe-toggle"><input type="checkbox" id="bpe-greeting-toggle" ${config.enableDeepSeekGreeting ? 'checked' : ''}><span class="slider"></span></label>
-        </div>
         <div>
           <div class="bpe-settings-label"><span>DeepSeek API Key</span></div>
           <p class="bpe-settings-desc">密钥保存在本地存储，不会上传</p>
           <input class="bpe-input" type="password" id="bpe-api-key" value="${escapeHTML(config.deepseekApiKey || GM_getValue('deep_api_key', '') || '')}" placeholder="sk-..." style="margin-top:8px;">
-        </div>
-        <div>
-          <div class="bpe-settings-label"><span>个人核心优势总结</span></div>
-          <p class="bpe-settings-desc">招呼语中展示的个人亮点，例如"2年全职商业化产品经验，主导项目累计流水数千万"</p>
-          <input class="bpe-input" type="text" id="bpe-personal-summary" value="${escapeHTML(getPersonalSummary())}" placeholder="简要描述您的核心竞争力..." style="margin-top:8px;">
         </div>
         <div class="bpe-settings-label">
           <div><span>自动跳过屏蔽公司</span><p class="bpe-settings-desc">开启后在自动投递时跳过黑名单中的公司</p></div>
@@ -2573,7 +2565,6 @@ function saveBlockedCompanies(list) {
 
     function doSave() {
       var updates = {};
-      var greetingToggle = qs('#bpe-greeting-toggle');
       var apiKeyInput = qs('#bpe-api-key');
       var skipToggle = qs('#bpe-skip-company');
       var limitInput = qs('#bpe-apply-limit');
@@ -2582,7 +2573,6 @@ function saveBlockedCompanies(list) {
       var salaryMinInput = qs('#bpe-salary-min');
       var salaryMaxInput = qs('#bpe-salary-max');
 
-      if (greetingToggle) updates.enableDeepSeekGreeting = greetingToggle.checked;
       if (apiKeyInput) { updates.deepseekApiKey = apiKeyInput.value.trim(); setApiKey(apiKeyInput.value.trim()); }
       if (skipToggle) updates.skipCommunicated = skipToggle.checked;
       if (limitInput) updates.applyLimit = Math.max(0, parseInt(limitInput.value) || 0);
@@ -2609,14 +2599,10 @@ function saveBlockedCompanies(list) {
       if (aiFilterToggle) updates.enableAIFilter = aiFilterToggle.checked;
       if (aiThresholdInput) updates.aiFilterThreshold = Math.max(0.1, Math.min(0.9, (parseInt(aiThresholdInput.value) || 35) / 100));
 
-      // Save personal summary & resume data
-      var personalSummaryInput = qs('#bpe-personal-summary');
-      if (personalSummaryInput) setPersonalSummary(personalSummaryInput.value.trim());
-
       var resumeTextarea = qs('#bpe-resume-data');
       if (resumeTextarea) {
         try {
-          var parsed = JSON.parse(resumeTextarea.value.trim());
+          var parsed = parseResumeJSON(resumeTextarea.value.trim());
           if (Array.isArray(parsed) && parsed.length > 0) {
             setResumeData(parsed);
           }
@@ -2661,7 +2647,8 @@ function saveBlockedCompanies(list) {
         var countSpan = qs('#bpe-resume-count');
         if (!textarea) return;
         try {
-          var parsed = JSON.parse(textarea.value.trim());
+          var raw = textarea.value.trim();
+          var parsed = parseResumeJSON(raw);
           if (!Array.isArray(parsed)) { showToast('JSON 格式错误：需要是数组格式', 'error', 3000); return; }
           setResumeData(parsed);
           if (countSpan) countSpan.textContent = '当前 ' + parsed.length + ' 条经验记录';
