@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Boss-Plus Public
 // @namespace    https://github.com/ANICIFIA/boss-plus-public
-// @version      1.0.1
+// @version      1.0.2
 // @author       ANICIFIA
 // @license      MIT
 // @description  通用 AI 招呼语生成 + 智能投递助手，支持自定义大模型 API 和个人经验数据导入
@@ -973,22 +973,30 @@ function saveBlockedCompanies(list) {
     localStorage.setItem(RESUME_DATA_KEY, JSON.stringify(data));
   }
 
-  // Parse user-pasted JSON, auto-fixing literal control chars (newlines/tabs)
-  // that are illegal in JSON strings but common in JS-originated data
+  // Parse user-pasted JSON. Data commonly originates from JS source code,
+  // so it may contain literal newlines, bare backslashes (Windows paths),
+  // or other JS escape sequences that are illegal in strict JSON.
   function parseResumeJSON(raw) {
     try {
       return JSON.parse(raw);
     } catch (e) {
-      if (e.message.indexOf('Bad control character') !== -1 || e.message.indexOf('Unexpected token') !== -1) {
-        // Escape literal control characters and retry
-        var cleaned = raw
-          .replace(/\r\n/g, '\n')
-          .replace(/\r/g, '')
-          .replace(/\n/g, '\\n')
-          .replace(/\t/g, '\\t');
-        return JSON.parse(cleaned);
+      // Data likely copied from JS source — evaluate as JS expression first
+      // (handles \n, \t, bare \\, etc. as they appear in actual JS arrays)
+      try {
+        return (new Function('return ' + raw))();
+      } catch (e2) {
+        // Fallback: escape control characters, then retry JSON.parse
+        try {
+          var cleaned = raw
+            .replace(/\r\n/g, '\n')
+            .replace(/\r/g, '')
+            .replace(/\n/g, '\\n')
+            .replace(/\t/g, '\\t');
+          return JSON.parse(cleaned);
+        } catch (e3) {
+          throw e; // throw original error
+        }
       }
-      throw e;
     }
   }
 
